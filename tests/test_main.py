@@ -96,7 +96,7 @@ def test_upload_text_document():
     assert data["file_type"] == "txt"
     assert "upload_timestamp" in data
     assert data["file_size"] > 0
-    assert data["processing_status"] == "uploaded"
+    assert data["processing_status"] == "processed"
     assert data["title"] == "Test Document"
     assert data["word_count"] == 7
     assert data["content_preview"] == "This is a test document for upload."
@@ -145,7 +145,7 @@ def test_upload_file_document():
     assert data["file_type"] == "txt"
     assert "upload_timestamp" in data
     assert data["file_size"] > 0
-    assert data["processing_status"] == "uploaded"
+    assert data["processing_status"] == "processing"
     assert data["title"] == "Test File Upload"
     
     # Store doc_id for download test

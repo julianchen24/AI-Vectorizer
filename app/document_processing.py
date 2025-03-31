@@ -136,15 +136,21 @@ def clean_text(text: str) -> str:
     """
     if not text:
         return ""
-        
-    # Replace multiple spaces with a single space
-    text = re.sub(r'\s+', ' ', text)
     
-    # Replace multiple newlines with a single newline
-    text = re.sub(r'\n+', '\n', text)
+    # First, normalize newlines
+    text = re.sub(r'\n{2,}', '\n', text)
     
-    # Remove leading/trailing whitespace from each line
-    lines = [line.strip() for line in text.split('\n')]
+    # Split into lines and process each line
+    lines = []
+    for line in text.split('\n'):
+        # Replace multiple spaces with a single space in each line
+        line = re.sub(r' +', ' ', line)
+        # Remove leading/trailing whitespace
+        line = line.strip()
+        if line:  # Only add non-empty lines
+            lines.append(line)
+    
+    # Join lines back with newlines
     text = '\n'.join(lines)
     
     # Remove non-printable characters
