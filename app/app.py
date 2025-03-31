@@ -19,6 +19,9 @@ from rank_bm25 import BM25Okapi
 import asyncio
 from fastapi.concurrency import run_in_threadpool
 
+# Import document processing module
+from app.document_processing import process_document, DocumentProcessingError
+
 app = FastAPI(
     title="AI Vectorizer",
     description="API for document management, BM25-based similarity search, and file uploads",
@@ -42,6 +45,8 @@ class DocumentMetadata(BaseModel):
     word_count: Optional[int] = Field(None, description="Word count if applicable")
     session_id: Optional[str] = Field(None, description="Session identifier for grouping uploads")
     content_preview: Optional[str] = Field(None, description="Preview of document content")
+    chunk_count: Optional[int] = Field(None, description="Number of chunks after processing")
+    total_tokens: Optional[int] = Field(None, description="Total number of tokens in the document")
 
 # In-memory storage for document metadata
 documents_metadata: Dict[str, DocumentMetadata] = {}
@@ -224,14 +229,17 @@ def extract_text_content(file_path: Path, file_type: str) -> Optional[str]:
     Returns:
         Text content preview or None if extraction fails
     """
-    # Simple text extraction for common file types
     try:
-        if file_type in ["txt", "md", "py", "js", "html", "css", "json"]:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read(1000)  # Read first 1000 chars for preview
-                return content
+        # Use document processing module for supported file types
+        if file_type in ["pdf", "docx", "doc", "txt", "md", "py", "js", "html", "css", "json"]:
+            # Process the document to extract text
+            result = process_document(file_path, max_tokens=512, overlap_tokens=50)
+            
+            # Return a preview of the extracted text
+            if result and result["extracted_text"]:
+                return result["extracted_text"][:1000]  # First 1000 chars for preview
         
-        # For binary files, just return a placeholder
+        # For unsupported file types, return None
         return None
     except Exception:
         return None
@@ -249,6 +257,44 @@ def estimate_word_count(text: Optional[str]) -> Optional[int]:
     if text:
         return len(text.split())
     return None
+
+async def process_document_task(file_path: Path, doc_id: str, file_type: str):
+    """
+    Background task to process a document.
+    
+    Args:
+        file_path: Path to the document file
+        doc_id: Document ID
+        file_type: File type/extension
+    """
+    try:
+        # Process the document
+        result = process_document(file_path, max_tokens=512, overlap_tokens=50)
+        
+        if doc_id in documents_metadata:
+            # Update metadata with processing results
+            metadata = documents_metadata[doc_id]
+            metadata.processing_status = "processed"
+            metadata.word_count = len(result["extracted_text"].split())
+            metadata.chunk_count = result["chunk_count"]
+            metadata.total_tokens = result["total_tokens"]
+            
+            # For PDFs, update page count if available
+            if file_type == "pdf" and "page_count" in result:
+                metadata.page_count = result.get("page_count")
+            
+            # Update corpus with chunks instead of just preview
+            for chunk in result["chunks"]:
+                if chunk not in corpus:
+                    corpus.append(chunk)
+            
+            # Update BM25 index
+            await update_bm25()
+    except Exception as e:
+        # Log the error and update metadata
+        if doc_id in documents_metadata:
+            metadata = documents_metadata[doc_id]
+            metadata.processing_status = "error"
 
 @app.post("/upload/", summary="Upload a document")
 async def upload_document(
@@ -306,11 +352,13 @@ async def upload_document(
             file_type=file_type,
             upload_timestamp=datetime.now(),
             file_size=os.path.getsize(file_path),
-            processing_status="uploaded",
+            processing_status="processing",  # Changed from "uploaded" to "processing"
             title=title or filename,
             content_preview=content_preview,
             word_count=estimate_word_count(content_preview),
-            session_id=session_id
+            session_id=session_id,
+            chunk_count=None,
+            total_tokens=None
         )
         
         # Add content to corpus if text was extracted
@@ -318,6 +366,10 @@ async def upload_document(
             corpus.append(content_preview)
             if background_tasks:
                 background_tasks.add_task(update_bm25)
+                
+        # Add background task to process the document
+        if background_tasks and file_type in ["pdf", "docx", "doc", "txt"]:
+            background_tasks.add_task(process_document_task, file_path, doc_id, file_type)
     
     # Handle text content
     elif text:
@@ -328,24 +380,56 @@ async def upload_document(
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(text)
         
-        # Create metadata
-        metadata = DocumentMetadata(
-            doc_id=doc_id,
-            filename=filename,
-            file_type="txt",
-            upload_timestamp=datetime.now(),
-            file_size=len(text.encode('utf-8')),
-            processing_status="uploaded",
-            title=title or "Text Document",
-            content_preview=text[:1000] if len(text) > 1000 else text,
-            word_count=len(text.split()),
-            session_id=session_id
-        )
-        
-        # Add content to corpus
-        corpus.append(text)
-        if background_tasks:
-            background_tasks.add_task(update_bm25)
+        # Process the text directly
+        try:
+            # Clean and chunk the text
+            result = process_document(file_path, max_tokens=512, overlap_tokens=50)
+            chunks = result["chunks"]
+            total_tokens = result["total_tokens"]
+            
+            # Create metadata
+            metadata = DocumentMetadata(
+                doc_id=doc_id,
+                filename=filename,
+                file_type="txt",
+                upload_timestamp=datetime.now(),
+                file_size=len(text.encode('utf-8')),
+                processing_status="processed",  # Already processed
+                title=title or "Text Document",
+                content_preview=text[:1000] if len(text) > 1000 else text,
+                word_count=len(text.split()),
+                session_id=session_id,
+                chunk_count=len(chunks),
+                total_tokens=total_tokens
+            )
+            
+            # Add chunks to corpus
+            for chunk in chunks:
+                if chunk not in corpus:
+                    corpus.append(chunk)
+            
+            if background_tasks:
+                background_tasks.add_task(update_bm25)
+                
+        except Exception as e:
+            # If processing fails, fall back to simple approach
+            metadata = DocumentMetadata(
+                doc_id=doc_id,
+                filename=filename,
+                file_type="txt",
+                upload_timestamp=datetime.now(),
+                file_size=len(text.encode('utf-8')),
+                processing_status="error",
+                title=title or "Text Document",
+                content_preview=text[:1000] if len(text) > 1000 else text,
+                word_count=len(text.split()),
+                session_id=session_id
+            )
+            
+            # Add content to corpus
+            corpus.append(text)
+            if background_tasks:
+                background_tasks.add_task(update_bm25)
     
     # Store metadata
     documents_metadata[doc_id] = metadata

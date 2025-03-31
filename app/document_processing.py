@@ -19,19 +19,20 @@ import fitz  # PyMuPDF
 import docx
 
 # For tokenization and chunking
-import nltk
-from nltk.tokenize import sent_tokenize
+import spacy
 import tiktoken
-
-# Ensure NLTK data is downloaded
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt', quiet=True)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Load spaCy model - using the small English model for efficiency
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    logger.info("Downloading spaCy model...")
+    spacy.cli.download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
 
 # GPT tokenizer for token counting
 ENCODING = tiktoken.get_encoding("cl100k_base")  # Default encoding for newer models
@@ -167,6 +168,27 @@ def count_tokens(text: str) -> int:
     tokens = ENCODING.encode(text)
     return len(tokens)
 
+def get_sentences(text: str) -> List[str]:
+    """
+    Split text into sentences using spaCy.
+    
+    Args:
+        text: Text to split into sentences
+        
+    Returns:
+        List of sentences
+    """
+    if not text:
+        return []
+    
+    # Process the text with spaCy
+    doc = nlp(text)
+    
+    # Extract sentences
+    sentences = [sent.text for sent in doc.sents]
+    
+    return sentences
+
 def chunk_text(
     text: str, 
     max_tokens: int = 512, 
@@ -211,8 +233,8 @@ def chunk_text(
                 current_chunk = ""
                 current_tokens = 0
             
-            # Split the paragraph into sentences
-            sentences = sent_tokenize(paragraph)
+            # Split the paragraph into sentences using spaCy
+            sentences = get_sentences(paragraph)
             
             sentence_chunk = ""
             sentence_tokens = 0
@@ -257,7 +279,7 @@ def chunk_text(
                         # Find the last few sentences that fit within overlap_tokens
                         overlap_text = ""
                         overlap_count = 0
-                        for s in reversed(sent_tokenize(sentence_chunk)):
+                        for s in reversed(get_sentences(sentence_chunk)):
                             s_count = count_tokens(s + " ")
                             if overlap_count + s_count <= overlap_tokens:
                                 overlap_text = s + " " + overlap_text
@@ -287,7 +309,7 @@ def chunk_text(
                 # Find the last few sentences that fit within overlap_tokens
                 overlap_text = ""
                 overlap_count = 0
-                for s in reversed(sent_tokenize(current_chunk)):
+                for s in reversed(get_sentences(current_chunk)):
                     s_count = count_tokens(s + " ")
                     if overlap_count + s_count <= overlap_tokens:
                         overlap_text = s + " " + overlap_text
