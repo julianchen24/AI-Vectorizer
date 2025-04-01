@@ -26,6 +26,9 @@ from app.document_processing import process_document, DocumentProcessingError
 # Import semantic search module
 from app.semantic_search import SemanticSearch
 
+# Import visualization module
+from app.visualization import VisualizationData, DimensionalityReductionMethod
+
 # Define search types
 class SearchType(str, enum.Enum):
     BM25 = "bm25"
@@ -735,3 +738,102 @@ async def download_document(doc_id: str) -> FileResponse:
         filename=metadata.filename,
         media_type=f"application/{metadata.file_type}"
     )
+
+@app.get("/visualization-data/", summary="Get visualization data for document embeddings")
+async def get_visualization_data(
+    method: DimensionalityReductionMethod = Query(
+        DimensionalityReductionMethod.TSNE, 
+        description="Dimensionality reduction method (tsne, umap, pca)"
+    ),
+    perplexity: int = Query(
+        30, 
+        description="Perplexity parameter for t-SNE (higher values consider more global structure)",
+        ge=5, 
+        le=50
+    ),
+    n_neighbors: int = Query(
+        15, 
+        description="Number of neighbors for UMAP (higher values consider more global structure)",
+        ge=2, 
+        le=100
+    ),
+    min_dist: float = Query(
+        0.1, 
+        description="Minimum distance for UMAP (lower values create tighter clusters)",
+        ge=0.0, 
+        le=0.99
+    ),
+    random_state: int = Query(
+        42, 
+        description="Random state for reproducibility",
+        ge=0
+    )
+) -> Dict[str, Any]:
+    """
+    Generate visualization data for document embeddings using dimensionality reduction.
+    
+    Args:
+        method: Dimensionality reduction method (t-SNE, UMAP, PCA)
+        perplexity: Perplexity parameter for t-SNE (default: 30)
+        n_neighbors: Number of neighbors for UMAP (default: 15)
+        min_dist: Minimum distance for UMAP (default: 0.1)
+        random_state: Random state for reproducibility (default: 42)
+        
+    Returns:
+        Dictionary with visualization data including 2D coordinates, document IDs, and metadata
+    """
+    if not corpus:
+        raise HTTPException(status_code=400, detail="Corpus is empty. Add documents first.")
+    
+    async with semaphore:
+        # Get document embeddings from semantic search
+        embeddings = await run_in_threadpool(
+            lambda: semantic_search.model.encode(corpus, show_progress_bar=False)
+        )
+        
+        # Prepare document IDs and metadata
+        document_ids = []
+        metadata_list = []
+        
+        for doc_idx, doc in enumerate(corpus):
+            # Find document ID for this corpus index
+            doc_id = None
+            for d_id, d_idx in document_to_corpus_index.items():
+                if d_idx == doc_idx:
+                    doc_id = d_id
+                    break
+            
+            # If no document ID found, generate one
+            if not doc_id:
+                doc_id = f"doc_{doc_idx}"
+            
+            document_ids.append(doc_id)
+            
+            # Get metadata if available
+            meta = None
+            if doc_id in documents_metadata:
+                meta = documents_metadata[doc_id].model_dump()
+            else:
+                # Create minimal metadata
+                meta = {
+                    "document": doc[:100] + "..." if len(doc) > 100 else doc,
+                    "corpus_index": doc_idx
+                }
+            
+            metadata_list.append(meta)
+        
+        # Generate visualization data
+        visualization_data = await run_in_threadpool(
+            lambda: VisualizationData.generate_visualization_data(
+                embeddings=embeddings,
+                document_ids=document_ids,
+                metadata=metadata_list,
+                method=method,
+                perplexity=perplexity,
+                n_neighbors=n_neighbors,
+                min_dist=min_dist,
+                random_state=random_state
+            )
+        )
+        
+        return visualization_data
