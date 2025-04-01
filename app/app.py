@@ -10,6 +10,7 @@ import os
 import uuid
 import shutil
 import enum
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union, Literal
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse
 from rank_bm25 import BM25Okapi
 import asyncio
 from fastapi.concurrency import run_in_threadpool
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Import document processing module
 from app.document_processing import process_document, DocumentProcessingError
@@ -28,6 +30,9 @@ from app.semantic_search import SemanticSearch
 
 # Import visualization module
 from app.visualization import VisualizationData, DimensionalityReductionMethod
+
+# Import insights module
+from app.insights import InsightsGenerator, ClusteringMethod
 
 # Define search types
 class SearchType(str, enum.Enum):
@@ -837,3 +842,190 @@ async def get_visualization_data(
         )
         
         return visualization_data
+
+@app.get("/insights/", summary="Get insights from document corpus")
+async def get_insights(
+    clustering_method: ClusteringMethod = Query(
+        ClusteringMethod.KMEANS, 
+        description="Clustering method (kmeans, dbscan, hierarchical)"
+    ),
+    n_clusters: Optional[int] = Query(
+        None, 
+        description="Number of clusters (optional, auto-determined if not provided)",
+        ge=2
+    ),
+    eps: float = Query(
+        0.5, 
+        description="Maximum distance between samples for DBSCAN",
+        ge=0.1, 
+        le=1.0
+    ),
+    min_samples: int = Query(
+        5, 
+        description="Minimum number of samples in a cluster for DBSCAN",
+        ge=2
+    ),
+    random_state: int = Query(
+        42, 
+        description="Random state for reproducibility",
+        ge=0
+    )
+) -> Dict[str, Any]:
+    """
+    Generate insights from document corpus, including clustering and similarity metrics.
+    
+    Args:
+        clustering_method: Clustering method (kmeans, dbscan, hierarchical)
+        n_clusters: Number of clusters (optional, auto-determined if not provided)
+        eps: Maximum distance between samples for DBSCAN
+        min_samples: Minimum number of samples in a cluster for DBSCAN
+        random_state: Random state for reproducibility
+        
+    Returns:
+        Dictionary with insights including clusters, labels, and similarity metrics
+    """
+    if not corpus:
+        raise HTTPException(status_code=400, detail="Corpus is empty. Add documents first.")
+    
+    async with semaphore:
+        # Get document embeddings from semantic search
+        embeddings = await run_in_threadpool(
+            lambda: semantic_search.model.encode(corpus, show_progress_bar=False)
+        )
+        
+        # Prepare document IDs and metadata
+        document_ids = []
+        metadata_list = []
+        
+        for doc_idx, doc in enumerate(corpus):
+            # Find document ID for this corpus index
+            doc_id = None
+            for d_id, d_idx in document_to_corpus_index.items():
+                if d_idx == doc_idx:
+                    doc_id = d_id
+                    break
+            
+            # If no document ID found, generate one
+            if not doc_id:
+                doc_id = f"doc_{doc_idx}"
+            
+            document_ids.append(doc_id)
+            
+            # Get metadata if available
+            meta = None
+            if doc_id in documents_metadata:
+                meta = documents_metadata[doc_id].model_dump()
+            else:
+                # Create minimal metadata
+                meta = {
+                    "document": doc[:100] + "..." if len(doc) > 100 else doc,
+                    "corpus_index": doc_idx
+                }
+            
+            metadata_list.append(meta)
+        
+        # Generate insights
+        insights = await run_in_threadpool(
+            lambda: InsightsGenerator.generate_insights(
+                embeddings=embeddings,
+                documents=corpus,
+                document_ids=document_ids,
+                metadata=metadata_list,
+                clustering_method=clustering_method,
+                n_clusters=n_clusters
+            )
+        )
+        
+        return insights
+
+@app.get("/insights/similar-pairs/", summary="Get similar document pairs")
+async def get_similar_pairs(
+    threshold: float = Query(
+        0.7, 
+        description="Similarity threshold (0.0 to 1.0)",
+        ge=0.5, 
+        le=0.99
+    ),
+    max_pairs: int = Query(
+        10, 
+        description="Maximum number of pairs to return",
+        ge=1, 
+        le=50
+    )
+) -> Dict[str, Any]:
+    """
+    Get pairs of similar documents for relationship visualization.
+    
+    Args:
+        threshold: Similarity threshold (0.0 to 1.0)
+        max_pairs: Maximum number of pairs to return
+        
+    Returns:
+        Dictionary with similar document pairs and their similarity scores
+    """
+    if not corpus:
+        raise HTTPException(status_code=400, detail="Corpus is empty. Add documents first.")
+    
+    async with semaphore:
+        # Get document embeddings from semantic search
+        embeddings = await run_in_threadpool(
+            lambda: semantic_search.model.encode(corpus, show_progress_bar=False)
+        )
+        
+        # Calculate pairwise cosine similarities
+        similarities = await run_in_threadpool(
+            lambda: cosine_similarity(embeddings)
+        )
+        
+        # Set diagonal to 0 (self-similarity)
+        np.fill_diagonal(similarities, 0)
+        
+        # Find document pairs with similarity above threshold
+        similar_pairs = []
+        for i in range(len(corpus)):
+            for j in range(i + 1, len(corpus)):
+                if similarities[i, j] >= threshold:
+                    # Find document IDs
+                    doc1_id = None
+                    doc2_id = None
+                    
+                    for d_id, d_idx in document_to_corpus_index.items():
+                        if d_idx == i:
+                            doc1_id = d_id
+                        elif d_idx == j:
+                            doc2_id = d_id
+                    
+                    # If no document ID found, generate one
+                    if not doc1_id:
+                        doc1_id = f"doc_{i}"
+                    if not doc2_id:
+                        doc2_id = f"doc_{j}"
+                    
+                    # Get document previews
+                    doc1_preview = corpus[i][:100] + "..." if len(corpus[i]) > 100 else corpus[i]
+                    doc2_preview = corpus[j][:100] + "..." if len(corpus[j]) > 100 else corpus[j]
+                    
+                    # Add to similar pairs
+                    similar_pairs.append({
+                        "doc1": {
+                            "id": doc1_id,
+                            "preview": doc1_preview
+                        },
+                        "doc2": {
+                            "id": doc2_id,
+                            "preview": doc2_preview
+                        },
+                        "similarity": float(similarities[i, j])
+                    })
+        
+        # Sort by similarity (descending)
+        similar_pairs.sort(key=lambda x: x["similarity"], reverse=True)
+        
+        # Limit to max_pairs
+        similar_pairs = similar_pairs[:max_pairs]
+        
+        return {
+            "similar_pairs": similar_pairs,
+            "total_pairs": len(similar_pairs),
+            "threshold": threshold
+        }
