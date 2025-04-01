@@ -1,17 +1,18 @@
 """
-AI Vectorizer - BM25 Search API
+AI Vectorizer - Search API
 
 This module provides a FastAPI application with endpoints for document management
-and BM25-based similarity search functionality. It also supports file uploads and
-metadata management.
+and similarity search functionality (BM25 and semantic search). It also supports 
+file uploads and metadata management.
 """
 
 import os
 import uuid
 import shutil
+import enum
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Literal
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse
@@ -22,15 +23,35 @@ from fastapi.concurrency import run_in_threadpool
 # Import document processing module
 from app.document_processing import process_document, DocumentProcessingError
 
+# Import semantic search module
+from app.semantic_search import SemanticSearch
+
+# Define search types
+class SearchType(str, enum.Enum):
+    BM25 = "bm25"
+    SEMANTIC = "semantic"
+
 app = FastAPI(
     title="AI Vectorizer",
-    description="API for document management, BM25-based similarity search, and file uploads",
-    version="1.0.0"
+    description="API for document management, similarity search (BM25 and semantic), and file uploads",
+    version="1.1.0"
 )
 
 # Create a temporary directory for file storage
 UPLOAD_DIR = Path("./uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Initialize semantic search
+semantic_search = SemanticSearch()
+
+# Search result model
+class SearchResult(BaseModel):
+    document: str = Field(..., description="Document text")
+    score: float = Field(..., description="Relevance score")
+    doc_id: Optional[str] = Field(None, description="Document ID if available")
+    title: Optional[str] = Field(None, description="Document title if available")
+    preview: str = Field(..., description="Preview snippet with highlighted matching text")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional document metadata")
 
 # Document metadata model
 class DocumentMetadata(BaseModel):
@@ -54,6 +75,9 @@ documents_metadata: Dict[str, DocumentMetadata] = {}
 # Limit concurrent requests to prevent overloading
 MAX_CONCURRENT_REQUESTS = 5  
 semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+# Map of document IDs to corpus indices
+document_to_corpus_index: Dict[str, int] = {}
 
 def tokenize_text(text: str) -> List[str]:
     """
@@ -89,38 +113,66 @@ corpus = [
 # Initialize BM25 with the initial corpus
 bm25 = BM25Okapi(tokenize_corpus(corpus))
 
-async def update_bm25():
+async def update_search_indices():
     """
-    Update the BM25 index with the current corpus.
+    Update both BM25 and semantic search indices with the current corpus.
     This is run as a background task when the corpus changes.
     """
     global bm25
+    
     if not corpus:  
         bm25 = None
+        semantic_search.update_corpus([])
         return
 
+    # Update BM25 index
     tokenized_corpus = tokenize_corpus(corpus)
     bm25 = BM25Okapi(tokenized_corpus)
+    
+    # Update semantic search index
+    semantic_search.update_corpus(corpus)
+    
     await asyncio.sleep(0.1)  # Small delay to ensure task completion
 
 @app.post("/add-doc/", summary="Add a document to the corpus")
 async def add_doc(
     new_doc: str = Query(..., description="New document to be added to the corpus"), 
+    doc_id: Optional[str] = Query(None, description="Optional document ID"),
+    title: Optional[str] = Query(None, description="Optional document title"),
     background_tasks: BackgroundTasks = None
-) -> Dict[str, List[str]]:
+) -> Dict[str, Any]:
     """
-    Add a new document to the corpus and update the BM25 index.
+    Add a new document to the corpus and update the search indices.
     
     Args:
         new_doc: Text of the document to add
+        doc_id: Optional document ID
+        title: Optional document title
         background_tasks: FastAPI background tasks handler
         
     Returns:
-        Dictionary with the updated corpus
+        Dictionary with the updated corpus and document info
     """
+    # Generate a document ID if not provided
+    if not doc_id:
+        doc_id = str(uuid.uuid4())
+    
+    # Add to corpus
+    corpus_index = len(corpus)
     corpus.append(new_doc)
-    background_tasks.add_task(update_bm25)
-    return {"Corpus added": corpus}
+    
+    # Map document ID to corpus index
+    document_to_corpus_index[doc_id] = corpus_index
+    
+    # Update search indices
+    background_tasks.add_task(update_search_indices)
+    
+    return {
+        "doc_id": doc_id,
+        "title": title,
+        "corpus_index": corpus_index,
+        "document": new_doc
+    }
 
 @app.post("/reset-corpus/", summary="Reset the document corpus")
 async def reset_corpus(
@@ -137,10 +189,11 @@ async def reset_corpus(
     Returns:
         Status message
     """
-    global corpus
+    global corpus, document_to_corpus_index
     if delete_all.upper() == "Y":
         corpus.clear()
-        background_tasks.add_task(update_bm25)
+        document_to_corpus_index.clear()
+        background_tasks.add_task(update_search_indices)
         return {"message": "Corpus reset"}
     return {"message": "Corpus not reset"}
 
@@ -162,17 +215,149 @@ async def get_query() -> Dict[str, Any]:
         "has_bm25_index": bm25 is not None
     }
 
-@app.post("/find-similar/", summary="Find similar documents")
-async def find_similar(
-    query: str = Query(..., description="Search query to find similar documents"),
-    n: int = Query(1, description="Number of results to return", ge=1, le=10)
-) -> Dict[str, List[str]]:
+@app.post("/search/", summary="Search for documents")
+async def search(
+    query: str = Query(..., description="Search query"),
+    search_type: SearchType = Query(SearchType.BM25, description="Search type (bm25 or semantic)"),
+    n: int = Query(5, description="Number of results to return", ge=1, le=50),
+    threshold: float = Query(0.5, description="Similarity threshold", ge=0.5, le=0.95)
+) -> Dict[str, List[SearchResult]]:
     """
-    Find documents similar to the query using BM25 ranking.
+    Search for documents similar to the query using either BM25 or semantic search.
     
     Args:
         query: Search query text
-        n: Number of results to return (default: 1)
+        search_type: Type of search to perform (bm25 or semantic)
+        n: Number of results to return (default: 5)
+        threshold: Minimum similarity score threshold (default: 0.5)
+        
+    Returns:
+        Dictionary with search results including document text, score, and preview
+    """
+    if not corpus:
+        raise HTTPException(status_code=400, detail="Corpus is empty. Add documents first.")
+    
+    async with semaphore:
+        results = []
+        
+        if search_type == SearchType.BM25:
+            # BM25 search
+            query_tokens = tokenize_text(query)
+            bm25_scores = await run_in_threadpool(
+                lambda: bm25.get_scores(query_tokens)
+            )
+            
+            # Get indices of documents with scores above threshold
+            # For BM25, normalize scores to 0-1 range for threshold comparison
+            if len(bm25_scores) > 0:
+                max_score = max(bm25_scores) if max(bm25_scores) > 0 else 1
+                indices = [i for i, score in enumerate(bm25_scores) 
+                          if score/max_score >= threshold]
+                
+                # Sort by score in descending order
+                indices = sorted(indices, key=lambda i: bm25_scores[i], reverse=True)[:n]
+                
+                # Create results
+                for idx in indices:
+                    doc = corpus[idx]
+                    score = float(bm25_scores[idx])
+                    
+                    # Find document ID and metadata if available
+                    doc_id = None
+                    title = None
+                    metadata = None
+                    
+                    # Look up document ID from corpus index
+                    for d_id, d_idx in document_to_corpus_index.items():
+                        if d_idx == idx:
+                            doc_id = d_id
+                            if doc_id in documents_metadata:
+                                metadata_obj = documents_metadata[doc_id]
+                                title = metadata_obj.title
+                                metadata = metadata_obj.model_dump()
+                            break
+                    
+                    # Create preview with highlighted terms
+                    preview = doc
+                    for term in query_tokens:
+                        if term in preview.lower():
+                            # Simple highlighting with asterisks
+                            start = preview.lower().find(term)
+                            end = start + len(term)
+                            term_in_doc = preview[start:end]
+                            preview = preview.replace(term_in_doc, f"**{term_in_doc}**", 1)
+                    
+                    # Truncate preview if too long
+                    if len(preview) > 300:
+                        # Find a good breaking point
+                        break_point = preview[:300].rfind(" ")
+                        if break_point == -1:
+                            break_point = 300
+                        preview = preview[:break_point] + "..."
+                    
+                    results.append(SearchResult(
+                        document=doc,
+                        score=score / max_score,  # Normalize score to 0-1 range
+                        doc_id=doc_id,
+                        title=title,
+                        preview=preview,
+                        metadata=metadata
+                    ))
+        
+        else:  # Semantic search
+            # Perform semantic search
+            semantic_results = await run_in_threadpool(
+                lambda: semantic_search.search(query, n=n, threshold=threshold)
+            )
+            
+            # Create results
+            for result in semantic_results:
+                doc = result["document"]
+                idx = result["index"]
+                score = result["score"]
+                
+                # Find document ID and metadata if available
+                doc_id = None
+                title = None
+                metadata = None
+                
+                # Look up document ID from corpus index
+                for d_id, d_idx in document_to_corpus_index.items():
+                    if d_idx == idx:
+                        doc_id = d_id
+                        if doc_id in documents_metadata:
+                            metadata_obj = documents_metadata[doc_id]
+                            title = metadata_obj.title
+                            metadata = metadata_obj.model_dump()
+                        break
+                
+                # Create preview with highlighted matches
+                preview = await run_in_threadpool(
+                    lambda: semantic_search.highlight_matches(query, doc)
+                )
+                
+                results.append(SearchResult(
+                    document=doc,
+                    score=score,
+                    doc_id=doc_id,
+                    title=title,
+                    preview=preview,
+                    metadata=metadata
+                ))
+    
+    return {"results": results}
+
+@app.post("/find-similar/", summary="Find similar documents (legacy endpoint)")
+async def find_similar(
+    query: str = Query(..., description="Search query to find similar documents"),
+    n: int = Query(5, description="Number of results to return", ge=1, le=10)
+) -> Dict[str, List[str]]:
+    """
+    Legacy endpoint for BM25 search. Use /search/ for more options.
+    
+    Args:
+        query: Search query text
+        n: Number of results to return (default: 5)
         
     Returns:
         Dictionary with the most similar documents
@@ -286,10 +471,13 @@ async def process_document_task(file_path: Path, doc_id: str, file_type: str):
             # Update corpus with chunks instead of just preview
             for chunk in result["chunks"]:
                 if chunk not in corpus:
+                    chunk_index = len(corpus)
                     corpus.append(chunk)
+                    # Map this chunk to the same document ID
+                    document_to_corpus_index[doc_id + f"_chunk_{chunk_index-len(corpus)+1}"] = chunk_index
             
-            # Update BM25 index
-            await update_bm25()
+            # Update search indices
+            await update_search_indices()
     except Exception as e:
         # Log the error and update metadata
         if doc_id in documents_metadata:
@@ -363,9 +551,11 @@ async def upload_document(
         
         # Add content to corpus if text was extracted
         if content_preview:
+            corpus_index = len(corpus)
             corpus.append(content_preview)
+            document_to_corpus_index[doc_id] = corpus_index
             if background_tasks:
-                background_tasks.add_task(update_bm25)
+                background_tasks.add_task(update_search_indices)
                 
         # Add background task to process the document
         if background_tasks and file_type in ["pdf", "docx", "doc", "txt"]:
@@ -404,12 +594,15 @@ async def upload_document(
             )
             
             # Add chunks to corpus
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
                 if chunk not in corpus:
+                    chunk_index = len(corpus)
                     corpus.append(chunk)
+                    # Map this chunk to the same document ID
+                    document_to_corpus_index[doc_id + f"_chunk_{i+1}"] = chunk_index
             
             if background_tasks:
-                background_tasks.add_task(update_bm25)
+                background_tasks.add_task(update_search_indices)
                 
         except Exception as e:
             # If processing fails, fall back to simple approach
@@ -427,9 +620,11 @@ async def upload_document(
             )
             
             # Add content to corpus
+            corpus_index = len(corpus)
             corpus.append(text)
+            document_to_corpus_index[doc_id] = corpus_index
             if background_tasks:
-                background_tasks.add_task(update_bm25)
+                background_tasks.add_task(update_search_indices)
     
     # Store metadata
     documents_metadata[doc_id] = metadata
@@ -505,7 +700,7 @@ async def delete_document(
     if metadata.content_preview and metadata.content_preview in corpus:
         corpus.remove(metadata.content_preview)
         if background_tasks:
-            background_tasks.add_task(update_bm25)
+            background_tasks.add_task(update_search_indices)
     
     # Delete metadata
     del documents_metadata[doc_id]
