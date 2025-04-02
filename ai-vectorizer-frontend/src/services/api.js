@@ -13,6 +13,12 @@ const api = axios.create({
 
 // API service functions
 const apiService = {
+  // Visualization data
+  getVisualizationData: async (params = {}) => {
+    const response = await api.get('/visualization-data/', { params });
+    return response.data;
+  },
+  
   // Document upload
   uploadDocument: async (file) => {
     const formData = new FormData();

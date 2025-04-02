@@ -7,6 +7,7 @@ import App from './App';
 jest.mock('./components/FileUpload', () => () => <div data-testid="file-upload">File Upload Component</div>);
 jest.mock('./components/DocumentList', () => () => <div data-testid="document-list">Document List Component</div>);
 jest.mock('./components/SearchInterface', () => () => <div data-testid="search-interface">Search Interface Component</div>);
+jest.mock('./components/VectorVisualization', () => () => <div data-testid="vector-visualization">Vector Visualization Component</div>);
 
 // Mock useState for activeTab
 const mockSetActiveTab = jest.fn();
@@ -64,6 +65,25 @@ describe('App Component', () => {
     expect(screen.queryByTestId('file-upload')).not.toBeInTheDocument();
     expect(screen.queryByTestId('document-list')).not.toBeInTheDocument();
     expect(screen.getByTestId('search-interface')).toBeInTheDocument();
+    expect(screen.queryByTestId('vector-visualization')).not.toBeInTheDocument();
+  });
+  
+  test('renders visualization tab when activeTab is visualization', () => {
+    // Mock the activeTab state to return 'visualization'
+    React.useState.mockImplementation((initialValue) => {
+      if (initialValue === 'upload') {
+        return ['visualization', mockSetActiveTab];
+      }
+      return [initialValue, jest.fn()];
+    });
+    
+    render(<App />);
+    
+    // Check that visualization component is visible
+    expect(screen.queryByTestId('file-upload')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('document-list')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('search-interface')).not.toBeInTheDocument();
+    expect(screen.getByTestId('vector-visualization')).toBeInTheDocument();
   });
 
   test('calls setActiveTab when search tab is clicked', () => {
@@ -75,5 +95,16 @@ describe('App Component', () => {
     
     // Check that setActiveTab was called with 'search'
     expect(mockSetActiveTab).toHaveBeenCalledWith('search');
+  });
+  
+  test('calls setActiveTab when visualization tab is clicked', () => {
+    render(<App />);
+    
+    // Click on the Visualization tab
+    const visualizationTab = screen.getByRole('button', { name: /^Visualization$/i });
+    fireEvent.click(visualizationTab);
+    
+    // Check that setActiveTab was called with 'visualization'
+    expect(mockSetActiveTab).toHaveBeenCalledWith('visualization');
   });
 });

@@ -9,11 +9,13 @@
     "@testing-library/user-event": "^13.5.0",
     "autoprefixer": "^10.4.16",
     "axios": "^1.8.4",
+    "d3": "^7.9.0",
     "postcss": "^8.4.31",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-dropzone": "^14.3.8",
     "react-scripts": "5.0.1",
+    "react-select": "^5.10.1",
     "tailwindcss": "^3.3.5",
     "web-vitals": "^2.1.4"
   },
@@ -27,6 +29,11 @@
     "extends": [
       "react-app",
       "react-app/jest"
+    ]
+  },
+  "jest": {
+    "transformIgnorePatterns": [
+      "node_modules/(?!(d3|d3-.*|internmap|react-select|axios)/)"
     ]
   },
   "browserslist": {

@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import FileUpload from './components/FileUpload';
 import DocumentList from './components/DocumentList';
 import SearchInterface from './components/SearchInterface';
+import VectorVisualization from './components/VectorVisualization';
 
 function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [activeTab, setActiveTab] = useState('upload'); // 'upload' or 'search'
+  const [activeTab, setActiveTab] = useState('upload'); // 'upload', 'search', or 'visualization'
 
   const handleUploadSuccess = () => {
     // Trigger a refresh of the document list
@@ -45,6 +46,16 @@ function App() {
               >
                 Search
               </button>
+              <button
+                className={`${
+                  activeTab === 'visualization'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+                onClick={() => setActiveTab('visualization')}
+              >
+                Visualization
+              </button>
             </nav>
           </div>
           
@@ -56,8 +67,10 @@ function App() {
                 <h2 className="text-lg font-medium text-gray-900 mb-4">Your Documents</h2>
                 <DocumentList refreshTrigger={refreshTrigger} />
               </div>
-            ) : (
+            ) : activeTab === 'search' ? (
               <SearchInterface />
+            ) : (
+              <VectorVisualization />
             )}
           </div>
         </div>
