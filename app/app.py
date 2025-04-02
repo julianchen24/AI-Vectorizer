@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Optional, Union, Literal
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from rank_bm25 import BM25Okapi
 import asyncio
 from fastapi.concurrency import run_in_threadpool
@@ -43,6 +44,15 @@ app = FastAPI(
     title="AI Vectorizer",
     description="API for document management, similarity search (BM25 and semantic), and file uploads",
     version="1.1.0"
+)
+
+# Add CORS middleware to allow cross-origin requests from the frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Create a temporary directory for file storage

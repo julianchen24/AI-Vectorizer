@@ -40,7 +40,11 @@ const apiService = {
       formData.append('title', title);
     }
     
-    const response = await api.post('/upload/', formData);
+    const response = await api.post('/upload/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
     return response.data;
   },
   

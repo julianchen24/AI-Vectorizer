@@ -15,7 +15,25 @@ const DocumentList = ({ refreshTrigger }) => {
         setError(null);
       } catch (err) {
         console.error('Error fetching documents:', err);
-        setError('Failed to load documents. Please try again later.');
+        let errorMessage = 'Failed to load documents. Please try again later.';
+        
+        if (err.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`;
+          console.error('Response data:', err.response.data);
+          console.error('Response status:', err.response.status);
+        } else if (err.request) {
+          // The request was made but no response was received
+          errorMessage = 'No response from server. Please check if the backend is running.';
+          console.error('Request:', err.request);
+        } else {
+          // Something happened in setting up the request that triggered an Error
+          errorMessage = err.message || 'Failed to load documents. Please try again later.';
+          console.error('Error message:', err.message);
+        }
+        
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -34,7 +52,22 @@ const DocumentList = ({ refreshTrigger }) => {
       setDocuments(documents.filter(doc => doc.doc_id !== docId));
     } catch (err) {
       console.error('Error deleting document:', err);
-      alert('Failed to delete document. Please try again.');
+      
+      let errorMessage = 'Failed to delete document. Please try again.';
+      
+      if (err.response) {
+        errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`;
+        console.error('Response data:', err.response.data);
+        console.error('Response status:', err.response.status);
+      } else if (err.request) {
+        errorMessage = 'No response from server. Please check if the backend is running.';
+        console.error('Request:', err.request);
+      } else {
+        errorMessage = err.message || 'Failed to delete document. Please try again.';
+        console.error('Error message:', err.message);
+      }
+      
+      alert(errorMessage);
     }
   };
 

@@ -24,7 +24,26 @@ const FileUpload = ({ onUploadSuccess }) => {
       }
     } catch (err) {
       console.error('Upload error:', err);
-      setError(err.response?.data?.detail || 'Error uploading file');
+      let errorMessage = 'Error uploading file';
+      
+      if (err.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`;
+        console.error('Response data:', err.response.data);
+        console.error('Response status:', err.response.status);
+        console.error('Response headers:', err.response.headers);
+      } else if (err.request) {
+        // The request was made but no response was received
+        errorMessage = 'No response from server. Please check if the backend is running.';
+        console.error('Request:', err.request);
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = err.message || 'Error uploading file';
+        console.error('Error message:', err.message);
+      }
+      
+      setError(errorMessage);
     } finally {
       setUploading(false);
     }
@@ -64,7 +83,26 @@ const FileUpload = ({ onUploadSuccess }) => {
       setTextTitle('');
     } catch (err) {
       console.error('Text upload error:', err);
-      setError(err.response?.data?.detail || 'Error uploading text');
+      let errorMessage = 'Error uploading text';
+      
+      if (err.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`;
+        console.error('Response data:', err.response.data);
+        console.error('Response status:', err.response.status);
+        console.error('Response headers:', err.response.headers);
+      } else if (err.request) {
+        // The request was made but no response was received
+        errorMessage = 'No response from server. Please check if the backend is running.';
+        console.error('Request:', err.request);
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = err.message || 'Error uploading text';
+        console.error('Error message:', err.message);
+      }
+      
+      setError(errorMessage);
     } finally {
       setUploading(false);
     }
