@@ -1,23 +1,46 @@
-# AI Vectorizer Service
+# AI Vectorizer Application
 
 ## Overview
-This AI Vectorizer Service is a FastAPI-based application utilizing the BM25 algorithm for text similarity and ranking. The service allows users to add documents, query the stored corpus, and retrieve the most similar documents based on a given search query. It is designed for high concurrency, leveraging Async IO and semaphores for efficient request handling.
+The AI Vectorizer is a full-stack application that combines a FastAPI backend with a React frontend to provide document management, semantic search, vector visualization, and document insights capabilities. The application allows users to upload documents, process them into vector representations, search for similar content, visualize document relationships, and gain insights through clustering and similarity analysis.
 
 ## Features
-- **FastAPI-based API:** Provides high-performance endpoints for document management and similarity search.
-- **BM25 Algorithm:** Uses BM25Okapi for ranking and retrieval of relevant documents.
-- **Asynchronous Processing:** Efficiently handles multiple requests using Async IO.
-- **Semaphore-based Request Control:** Limits the number of concurrent requests to prevent overload.
-- **Background Task Handling:** Updates the BM25 index asynchronously when adding or resetting documents.
-- **Automated Testing:** Includes test cases using FastAPI's TestClient and pytest.
+- **Document Management:** Upload, list, and delete documents (PDF, DOCX, TXT, etc.)
+- **Document Processing:** Extract text, chunk documents, and generate vector embeddings
+- **Search Capabilities:** 
+  - **BM25 Search:** Traditional keyword-based search using BM25Okapi algorithm
+  - **Semantic Search:** Meaning-based search using sentence transformers
+- **Vector Visualization:** Visualize document embeddings in 2D space using various dimensionality reduction techniques (t-SNE, UMAP, PCA)
+- **Document Insights:** 
+  - **Clustering:** Group similar documents using various clustering algorithms (K-Means, DBSCAN, Hierarchical)
+  - **Similar Pairs:** Identify and visualize pairs of similar documents
+- **Asynchronous Processing:** Efficiently handles multiple requests using Async IO
+- **Comprehensive Testing:** Includes unit tests, integration tests, and end-to-end tests
+
+## Architecture
+
+### Backend (FastAPI)
+- **Document Management Module:** Handles file uploads, metadata storage, and document retrieval
+- **Document Processing Module:** Extracts text, chunks documents, and processes content
+- **Semantic Search Module:** Implements BM25 and semantic search using sentence transformers
+- **Visualization Module:** Generates 2D visualizations of document embeddings
+- **Insights Module:** Provides document clustering and similarity analysis
+
+### Frontend (React)
+- **File Upload Component:** Allows users to upload documents and text content
+- **Document List Component:** Displays and manages uploaded documents
+- **Search Interface Component:** Provides search functionality with result display
+- **Vector Visualization Component:** Interactive visualization of document embeddings
+- **Insights Component:** Displays document clusters and similar document pairs
 
 ## Installation
 
 ### Prerequisites
 - Python 3.8+
+- Node.js 14+
+- npm 6+
 - Virtual environment (recommended)
 
-### Setup
+### Backend Setup
 1. Clone the repository:
    ```bash
    git clone https://github.com/julianchen24/AI-Vectorizer.git
@@ -28,77 +51,133 @@ This AI Vectorizer Service is a FastAPI-based application utilizing the BM25 alg
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
-3. Install dependencies:
+3. Install backend dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
+### Frontend Setup
+1. Navigate to the frontend directory:
+   ```bash
+   cd ai-vectorizer-frontend
+   ```
+2. Install frontend dependencies:
+   ```bash
+   npm install
+   ```
+
 ## Usage
 
-### Running the Service
-Start the FastAPI application:
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+### Running the Application
+
+1. Start the backend server:
+   ```bash
+   uvicorn app.app:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+2. Start the frontend development server:
+   ```bash
+   cd ai-vectorizer-frontend
+   npm start
+   ```
+
+3. Open your browser and navigate to `http://localhost:3000`
+
+### Using the Application
+
+1. **Upload Documents:**
+   - Navigate to the "Upload & Manage" tab
+   - Upload PDF, DOCX, or TXT files, or enter text content directly
+   - View and manage your uploaded documents
+
+2. **Search Documents:**
+   - Navigate to the "Search" tab
+   - Enter a search query
+   - Choose between BM25 and semantic search
+   - View search results with relevance scores
+
+3. **Visualize Document Vectors:**
+   - Navigate to the "Visualization" tab
+   - View document embeddings in 2D space
+   - Change visualization parameters (method, perplexity, etc.)
+   - Interact with the visualization (zoom, pan, select)
+
+4. **Explore Document Insights:**
+   - Navigate to the "Insights" tab
+   - View document clusters and their keywords
+   - Change clustering parameters
+   - Explore similar document pairs
 
 ### API Endpoints
 
-#### 1. Add Document
-- **Endpoint:** `POST /add-doc/`
-- **Description:** Adds a new document to the corpus.
-- **Query Parameters:** `new_doc` (string) - The document to be added.
-- **Example Request:**
-  ```bash
-  curl -X POST "http://localhost:8000/add-doc/?new_doc=Deep%20learning%20is%20a%20powerful%20AI%20technique."
-  ```
+The backend provides a comprehensive API for document management, search, visualization, and insights. Key endpoints include:
 
-#### 2. Reset Corpus
-- **Endpoint:** `POST /reset-corpus/`
-- **Description:** Clears the document corpus.
-- **Query Parameters:** `delete_all` (string) - Must be set to "Y" to confirm deletion.
-- **Example Request:**
-  ```bash
-  curl -X POST "http://localhost:8000/reset-corpus/?delete_all=Y"
-  ```
+#### Document Management
+- `POST /upload/`: Upload a document or text content
+- `GET /documents/`: List all documents
+- `GET /documents/{doc_id}`: Get document metadata
+- `DELETE /documents/{doc_id}`: Delete a document
 
-#### 3. Query BM25 Vectors
-- **Endpoint:** `GET /query/`
-- **Description:** Retrieves BM25 vectors from the stored corpus.
-- **Example Request:**
-  ```bash
-  curl -X GET "http://localhost:8000/query/"
-  ```
+#### Search
+- `POST /search/`: Search for documents using BM25 or semantic search
+- `POST /find-similar/`: Legacy endpoint for BM25 search
 
-#### 4. Find Similar Document
-- **Endpoint:** `POST /find-similar/`
-- **Description:** Finds the most similar document based on the given query.
-- **Query Parameters:** `query` (string) - The search query.
-- **Example Request:**
-  ```bash
-  curl -X POST "http://localhost:8000/find-similar/?query=Artificial%20Intelligence"
-  ```
+#### Visualization
+- `GET /visualization-data/`: Get visualization data for document embeddings
 
-## Asynchronous Request Handling
-This service uses **asyncio.Semaphore** to manage concurrent requests, ensuring that no more than a specified number of requests are processed simultaneously. This prevents resource exhaustion and improves system stability.
+#### Insights
+- `GET /insights/`: Get insights from document corpus
+- `GET /insights/similar-pairs/`: Get similar document pairs
 
-## Running Tests
-Automated tests are provided using pytest and FastAPI's TestClient.
+## Testing
 
-1. Install test dependencies:
-   ```bash
-   pip install pytest
-   ```
-2. Run the tests:
+The application includes comprehensive testing at multiple levels:
+
+### Backend Tests
+
+1. Run backend tests:
    ```bash
    pytest
    ```
 
+These tests include:
+- Unit tests for individual components
+- Integration tests for component interactions
+- API tests using FastAPI's TestClient
+
+### Frontend Tests
+
+1. Run frontend tests:
+   ```bash
+   cd ai-vectorizer-frontend
+   npm test
+   ```
+
+These tests include:
+- Component tests using React Testing Library
+- End-to-end tests simulating user journeys
+
+For detailed testing procedures, see [TESTING.md](TESTING.md).
+
+## Performance Considerations
+
+- **Asynchronous Processing:** The backend uses asyncio and semaphores to manage concurrent requests efficiently
+- **Chunking Strategy:** Documents are chunked to optimize vector representation and search relevance
+- **Caching:** Search indices are updated asynchronously to improve response times
+- **Lazy Loading:** The frontend implements lazy loading for improved performance
+
+## Future Enhancements
+
+- Advanced document processing capabilities
+- Additional visualization options
+- Improved clustering algorithms
+- User authentication and document sharing
+- Deployment options (Docker, cloud services)
+
 ## Contributions
 
-All contributions welcome.
-
-
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
-This project is licensed under the MIT License.
 
+This project is licensed under the MIT License.

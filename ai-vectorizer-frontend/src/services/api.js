@@ -19,6 +19,18 @@ const apiService = {
     return response.data;
   },
   
+  // Get insights from document corpus
+  getInsights: async (params = {}) => {
+    const response = await api.get('/insights/', { params });
+    return response.data;
+  },
+  
+  // Get similar document pairs
+  getSimilarPairs: async (params = {}) => {
+    const response = await api.get('/insights/similar-pairs/', { params });
+    return response.data;
+  },
+  
   // Document upload
   uploadDocument: async (file) => {
     const formData = new FormData();
