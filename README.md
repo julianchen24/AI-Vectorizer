@@ -3,6 +3,15 @@
 ## Overview
 The AI Vectorizer is a full-stack application that combines a FastAPI backend with a React frontend to provide document management, semantic search, vector visualization, and document insights capabilities. The application allows users to upload documents, process them into vector representations, search for similar content, visualize document relationships, and gain insights through clustering and similarity analysis.
 
+![image](https://github.com/user-attachments/assets/4c6d2f98-641b-4905-a795-99195e96af7f)
+
+![image](https://github.com/user-attachments/assets/3dc92d43-fde6-4552-9e61-3551070b1e16)
+
+![image](https://github.com/user-attachments/assets/17826272-5af1-4f5e-a4a2-e3642921c505)
+
+![image](https://github.com/user-attachments/assets/cf99361b-ff37-4ea7-9ea5-436b1cfd1747)
+
+
 ## Features
 - **Document Management:** Upload, list, and delete documents (PDF, DOCX, TXT, etc.)
 - **Document Processing:** Extract text, chunk documents, and generate vector embeddings
